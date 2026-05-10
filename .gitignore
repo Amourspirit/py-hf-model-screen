@@ -35,3 +35,7 @@ storage/
 # Local folders
 storage/
 tmp/
+outputs/
+
+# Local user project configuration
+project-config-local/
