@@ -1,0 +1,37 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+## Virtual environments
+.venv/
+venv/
+.envrc
+
+# Testing
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.coverage
+*.log
+.pytest_cache/
+
+# Environment files
+.env
+!.env.example
+
+storage/
+
+# VS Code
+.vscode/*
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# Local folders
+storage/
+tmp/
