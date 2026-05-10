@@ -13,6 +13,7 @@ Hugging Face model screening harness for private local repositories.
 ## Configuration files
 
 - Shared defaults: `project-config/default_config.yaml`
+- Shared round-two roadmap fidelity example: `project-config/round_two_roadmap_fidelity.yaml`
 - Local configs (git-ignored): `project-config-local/*.yaml`
 
 Config precedence is:
@@ -35,6 +36,8 @@ If you pass `--config /abs/path/custom.yaml`, that file is used directly.
 
 ## Direct script usage
 
+Base harness:
+
 ```bash
 uv run python ./scripts/hf_repo_model_screen.py \
 	--repo /path/to/project
@@ -49,6 +52,14 @@ uv run python ./scripts/hf_repo_model_screen.py \
 	--max-file-chars 3500 \
 	--max-tokens 900 \
 	--save-context
+```
+
+Round-two roadmap fidelity harness:
+
+```bash
+uv run python ./scripts/hf_repo_model_screen_v2.py \
+	--repo /path/to/project \
+	--config project-config/round_two_roadmap_fidelity.yaml
 ```
 
 Print merged runtime config:
