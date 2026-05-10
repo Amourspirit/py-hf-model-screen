@@ -1,0 +1,96 @@
+model_screen:
+  config:
+    models:
+      - Qwen/Qwen3-Coder-30B-A3B-Instruct
+      - YOUR_SECOND_CHALLENGER_MODEL_HERE
+    include_files:
+      - README.md
+      - AGENTS.md
+      - document/README.md
+      - document/roadmaps/stack-roadmap.md
+      - document/architecture/stack-architecture.md
+      - document/architecture/rag-architecture.md
+      - document/structure.md
+      - document/runbooks/hybrid-retrieval-runtime-validation.md
+      - document/runbooks/image-retrieval-runtime-validation.md
+      - .env.example
+      - docker-compose.yml
+      - Makefile
+      - Project-Spiral.code-workspace
+      - project-config/ingest/profiles.yml
+      - project-config/ingest/sources.yml
+      - codebase/service-tier/router-service/README.md
+      - codebase/service-tier/retrieval-service/README.md
+      - codebase/service-tier/ingest-service/README.md
+      - codebase/service-tier/inference-service/README.md
+      - codebase/service-tier/vision-embedding-service/README.md
+      - codebase/service-tier/logging-service/README.md
+    include_globs:
+      - project-config/retrieval/*.yml
+      - project-config/inference/**/*.yml
+      - document/adr/*.md
+    prompts:
+      - id: roadmap_next_slice
+        title: Roadmap-Aligned Next Slice
+        prompt: |
+          Based only on the repository context below, identify the next recommended pull request slice that aligns with the documented roadmap and active workstream.
+
+          Requirements:
+          - Prefer the documented roadmap over generic cleanup ideas
+          - Do not invent a new initiative if the roadmap already indicates next work
+          - Name the likely affected files
+          - Name the tests or runbooks to check
+          - Name the canonical docs that justify your recommendation
+          - Keep the scope tight and interruption-safe
+
+          Answer directly in these sections:
+          1. Recommended PR Slice
+          2. Why This Is Next
+          3. Likely Files
+          4. Validation
+          5. Risks
+      - id: roadmap_alignment_check
+        title: Roadmap Alignment Check
+        prompt: |
+          Based only on the repository context below, list the active or next-planned workstreams that are actually supported by the roadmap and architecture docs.
+
+          Requirements:
+          - Do not describe your plan
+          - Do not suggest unrelated cleanup
+          - Distinguish between implemented baseline, active, planned, and deferred work
+          - Mention the canonical docs that support the answer
+
+          Answer directly in 8-12 bullets.
+      - id: retrieval_change_impact
+        title: Retrieval Change Impact With Justification
+        prompt: |
+          Based only on the repository context below, assume a small change is being made in the retrieval service.
+
+          List the adjacent surfaces that should also be reviewed so the change is not incomplete.
+
+          Requirements:
+          - Be concrete
+          - Prefer exact files, configs, services, and docs when possible
+          - Include validation surfaces
+          - Briefly justify each item from the documented architecture or roadmap
+
+          Answer directly in bullets.
+  params:
+    repo: /path/to/project
+    output_dir: ./outputs
+    output_formats:
+      - json
+      - csv
+      - markdown
+      - yaml
+    short_name: round_two_roadmap
+    passes: 2
+    max_context_chars: 36000
+    max_file_chars: 3500
+    max_tokens: 900
+    temperature: 0.2
+    top_p: 0.95
+    top_k: 20
+    provider: null
+    save_context: true
+    base_url: https://router.huggingface.co/v1
