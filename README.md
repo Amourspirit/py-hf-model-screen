@@ -12,14 +12,14 @@ Hugging Face model screening harness for private local repositories.
 
 ## Configuration files
 
-- Shared defaults: `project-config/example_config.yaml`
+- Shared defaults: `project-config/default_config.yaml`
 - Local configs (git-ignored): `project-config-local/*.yaml`
 
 Config precedence is:
 
 1. CLI overrides
 2. User config file
-3. Shared defaults in `project-config/example_config.yaml`
+3. Shared defaults in `project-config/default_config.yaml`
 
 If you pass `--config qwen_config`, the script resolves it to:
 
@@ -71,7 +71,7 @@ uv run python ./scripts/hf_repo_model_screen.py \
 
 ## Makefile usage
 
-Default config (`project-config/example_config.yaml`):
+Default config (`project-config/default_config.yaml`):
 
 ```bash
 make screen-default REPO=/path/to/project

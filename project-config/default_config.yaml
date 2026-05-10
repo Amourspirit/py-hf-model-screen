@@ -1,0 +1,54 @@
+model_screen:
+  config:
+    models:
+      - Qwen/Qwen3-Coder-30B-A3B-Instruct
+      - Qwen/Qwen3.6-35B-A3B
+    include_files:
+      - README.md
+      - AGENTS.md
+    include_globs:
+      - project-config/*.yml
+    prompts:
+      - id: repo_state
+        title: Repo State Summary
+        prompt: |
+          Based only on the repository context below, summarize the current state of the project in 8 bullets.
+          Do not describe your plan.
+          Do not say what you will check.
+          Answer directly.
+      - id: pr_slice
+        title: Smallest Safe PR Slice
+        prompt: |
+          Given the repository context below, propose the smallest safe pull request for the next meaningful improvement.
+          Include:
+          - likely affected files
+          - tests to run
+          - docs/config updates
+          - risks if done incorrectly
+          Keep the scope tight.
+      - id: change_impact
+        title: Adjacent Surfaces Review
+        prompt: |
+          Given the repository context below, assume a small change is being made in the retrieval service.
+          List the adjacent surfaces that should also be reviewed so the change is not incomplete.
+          Be concrete and concise.
+
+  params:
+    repo: /path/to/project
+    output_dir: ./outputs
+    output_formats:
+      - json
+      - csv
+      - markdown
+      - yaml
+    short_name: results
+    passes: 2
+    max_context_chars: 36000
+    max_file_chars: 3500
+    max_tokens: 900
+    temperature: 0.2
+    top_p: 0.95
+    top_k: 20
+    provider: null
+    save_context: true
+    base_url: https://router.huggingface.co/v1
