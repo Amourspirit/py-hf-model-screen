@@ -40,14 +40,31 @@ DEFAULT_MODELS = [
 DEFAULT_INCLUDE_FILES = [
     "README.md",
     "AGENTS.md",
-    "Makefile",
+    "document/README.md",
+    "document/roadmaps/stack-roadmap.md",
+    "document/architecture/stack-architecture.md",
+    "document/architecture/rag-architecture.md",
+    "document/structure.md",
+    "document/runbooks/hybrid-retrieval-runtime-validation.md",
+    "document/runbooks/image-retrieval-runtime-validation.md",
+    ".env.example",
     "docker-compose.yml",
+    "Makefile",
     "Project-Spiral.code-workspace",
+    "project-config/ingest/profiles.yml",
+    "project-config/ingest/sources.yml",
+    "codebase/service-tier/router-service/README.md",
+    "codebase/service-tier/retrieval-service/README.md",
+    "codebase/service-tier/ingest-service/README.md",
+    "codebase/service-tier/inference-service/README.md",
+    "codebase/service-tier/vision-embedding-service/README.md",
+    "codebase/service-tier/logging-service/README.md",
 ]
 
 DEFAULT_INCLUDE_GLOBS = [
-    "documents/**/*.md",
-    "codebase/service-tier/**/README.md",
+    "project-config/retrieval/*.yml",
+    "project-config/inference/**/*.yml",
+    "document/adr/*.md",
 ]
 
 DEFAULT_PROMPTS = [
@@ -135,11 +152,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--max-context-chars",
         type=int,
-        default=32000,
+        default=36000,
         help="Max total chars of repo context",
     )
     parser.add_argument(
-        "--max-file-chars", type=int, default=5000, help="Max chars per included file"
+        "--max-file-chars", type=int, default=3500, help="Max chars per included file"
     )
     parser.add_argument(
         "--max-tokens", type=int, default=900, help="max_tokens for completion"
