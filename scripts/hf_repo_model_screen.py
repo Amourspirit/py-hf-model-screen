@@ -25,82 +25,44 @@ import os
 import re
 import sys
 import time
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
+import yaml
 from openai import OpenAI
 
 
-DEFAULT_MODELS = [
-    "Qwen/Qwen3-Coder-30B-A3B-Instruct",
-    "Qwen/Qwen3.6-35B-A3B",
-]
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_CONFIG_PATH = PROJECT_ROOT / "project-config" / "example_config.yaml"
+LOCAL_CONFIG_DIR = PROJECT_ROOT / "project-config-local"
 
-DEFAULT_INCLUDE_FILES = [
-    "README.md",
-    "AGENTS.md",
-    "document/README.md",
-    "document/roadmaps/stack-roadmap.md",
-    "document/architecture/stack-architecture.md",
-    "document/architecture/rag-architecture.md",
-    "document/structure.md",
-    "document/runbooks/hybrid-retrieval-runtime-validation.md",
-    "document/runbooks/image-retrieval-runtime-validation.md",
-    ".env.example",
-    "docker-compose.yml",
-    "Makefile",
-    "Project-Spiral.code-workspace",
-    "project-config/ingest/profiles.yml",
-    "project-config/ingest/sources.yml",
-    "codebase/service-tier/router-service/README.md",
-    "codebase/service-tier/retrieval-service/README.md",
-    "codebase/service-tier/ingest-service/README.md",
-    "codebase/service-tier/inference-service/README.md",
-    "codebase/service-tier/vision-embedding-service/README.md",
-    "codebase/service-tier/logging-service/README.md",
-]
 
-DEFAULT_INCLUDE_GLOBS = [
-    "project-config/retrieval/*.yml",
-    "project-config/inference/**/*.yml",
-    "document/adr/*.md",
-]
+@dataclass
+class PromptConfig:
+    id: str
+    title: str
+    prompt: str
 
-DEFAULT_PROMPTS = [
-    {
-        "id": "repo_state",
-        "title": "Repo State Summary",
-        "prompt": (
-            "Based only on the repository context below, summarize the current state of the project in 8 bullets.\n"
-            "Do not describe your plan.\n"
-            "Do not say what you will check.\n"
-            "Answer directly.\n"
-        ),
-    },
-    {
-        "id": "pr_slice",
-        "title": "Smallest Safe PR Slice",
-        "prompt": (
-            "Given the repository context below, propose the smallest safe pull request for the next meaningful improvement.\n"
-            "Include:\n"
-            "- likely affected files\n"
-            "- tests to run\n"
-            "- docs/config updates\n"
-            "- risks if done incorrectly\n"
-            "Keep the scope tight.\n"
-        ),
-    },
-    {
-        "id": "change_impact",
-        "title": "Adjacent Surfaces Review",
-        "prompt": (
-            "Given the repository context below, assume a small change is being made in the retrieval service.\n"
-            "List the adjacent surfaces that should also be reviewed so the change is not incomplete.\n"
-            "Be concrete and concise.\n"
-        ),
-    },
-]
+
+@dataclass
+class RuntimeConfig:
+    repo: str | None
+    output_dir: str
+    models: List[str]
+    include_files: List[str]
+    include_globs: List[str]
+    prompts: List[PromptConfig]
+    passes: int
+    max_context_chars: int
+    max_file_chars: int
+    max_tokens: int
+    temperature: float
+    top_p: float
+    top_k: int
+    provider: str | None
+    save_context: bool
+    base_url: str
 
 
 @dataclass
@@ -132,53 +94,94 @@ class RunMetrics:
     error: str | None
 
 
+def get_with_alias(data: Dict[str, Any], *keys: str, default: Any = None) -> Any:
+    for key in keys:
+        if key in data:
+            return data[key]
+    return default
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Screen Hugging Face chat models against local repo context."
     )
     parser.add_argument(
-        "--repo", required=True, help="Absolute path to your local repository checkout"
+        "--config",
+        default=None,
+        help=(
+            "Path to a YAML config file, or config name that resolves to "
+            "project-config-local/<name>.yaml"
+        ),
     )
-    parser.add_argument("--outdir", default="out", help="Output directory for reports")
     parser.add_argument(
-        "--models", nargs="*", default=DEFAULT_MODELS, help="Model IDs to test"
+        "--repo",
+        default=None,
+        help="Absolute path to your local repository checkout",
+    )
+    parser.add_argument(
+        "--outdir",
+        default=None,
+        help="Output directory for reports (overrides YAML output_dir)",
+    )
+    parser.add_argument(
+        "--models",
+        nargs="*",
+        default=None,
+        help="Model IDs to test (overrides YAML models)",
     )
     parser.add_argument(
         "--passes",
         type=int,
-        default=2,
+        default=None,
         help="How many times to run each prompt per model",
     )
     parser.add_argument(
         "--max-context-chars",
         type=int,
-        default=36000,
+        default=None,
         help="Max total chars of repo context",
     )
     parser.add_argument(
-        "--max-file-chars", type=int, default=3500, help="Max chars per included file"
+        "--max-file-chars",
+        type=int,
+        default=None,
+        help="Max chars per included file",
     )
     parser.add_argument(
-        "--max-tokens", type=int, default=900, help="max_tokens for completion"
+        "--max-tokens",
+        type=int,
+        default=None,
+        help="max_tokens for completion",
     )
     parser.add_argument(
-        "--temperature", type=float, default=0.2, help="Sampling temperature"
+        "--temperature",
+        type=float,
+        default=None,
+        help="Sampling temperature",
     )
     parser.add_argument(
-        "--top-p", type=float, dest="top_p", default=0.95, help="Sampling top_p"
+        "--top-p",
+        type=float,
+        dest="top_p",
+        default=None,
+        help="Sampling top_p",
     )
     parser.add_argument(
         "--top-k",
         type=int,
         dest="top_k",
-        default=20,
+        default=None,
         help="Provider-specific top_k via extra_body",
     )
     parser.add_argument(
-        "--token", default=None, help="HF token; otherwise reads HF_TOKEN env var"
+        "--token",
+        default=None,
+        help="HF token; otherwise reads HF_TOKEN env var",
     )
     parser.add_argument(
-        "--provider", default=None, help="Optional provider hint, e.g. hf-inference"
+        "--provider",
+        default=None,
+        help="Optional provider hint, e.g. hf-inference",
     )
     parser.add_argument(
         "--extra-file",
@@ -195,9 +198,206 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--save-context",
         action="store_true",
+        default=None,
         help="Save assembled repo context to disk",
     )
+    parser.add_argument(
+        "--no-save-context",
+        action="store_false",
+        dest="save_context",
+        help="Do not save assembled repo context",
+    )
+    parser.add_argument(
+        "--print-effective-config",
+        action="store_true",
+        help="Print resolved runtime configuration as JSON and continue",
+    )
+    parser.add_argument(
+        "--dry-run-context",
+        action="store_true",
+        help=(
+            "Build repo context and write repo_context.txt, then exit without "
+            "calling the API"
+        ),
+    )
     return parser.parse_args()
+
+
+def resolve_config_path(config_arg: str | None) -> Path:
+    if not config_arg:
+        return DEFAULT_CONFIG_PATH
+
+    raw = config_arg.strip()
+    input_path = Path(raw).expanduser()
+    looks_like_path = input_path.is_absolute() or raw.startswith(".") or "/" in raw
+    if looks_like_path:
+        return input_path.resolve()
+
+    name = raw if raw.endswith((".yaml", ".yml")) else f"{raw}.yaml"
+    return (LOCAL_CONFIG_DIR / name).resolve()
+
+
+def read_yaml_file(path: Path) -> Dict[str, Any]:
+    if not path.exists() or not path.is_file():
+        raise RuntimeError(f"Config file not found: {path}")
+
+    try:
+        loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise RuntimeError(f"Unable to parse YAML config at {path}: {exc}") from exc
+
+    if loaded is None:
+        loaded = {}
+    if not isinstance(loaded, dict):
+        raise RuntimeError(f"Config root must be a mapping in {path}")
+    return loaded
+
+
+def load_model_screen_section(path: Path) -> Dict[str, Any]:
+    raw = read_yaml_file(path)
+    section = raw.get("model_screen", raw)
+    if not isinstance(section, dict):
+        raise RuntimeError(
+            f"Config file {path} must have a 'model_screen' mapping at top-level"
+        )
+    return section
+
+
+def merge_dicts(defaults: Dict[str, Any], overrides: Dict[str, Any]) -> Dict[str, Any]:
+    merged: Dict[str, Any] = dict(defaults)
+    for key, value in overrides.items():
+        if isinstance(value, dict) and key in merged and isinstance(merged[key], dict):
+            merged[key] = merge_dicts(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def validate_prompts(raw_prompts: Any) -> List[PromptConfig]:
+    if not isinstance(raw_prompts, list) or not raw_prompts:
+        raise RuntimeError(
+            "Config must define a non-empty list at model_screen.config.prompts"
+        )
+
+    prompts: List[PromptConfig] = []
+    for idx, entry in enumerate(raw_prompts, start=1):
+        if not isinstance(entry, dict):
+            raise RuntimeError(f"Prompt at index {idx} must be a mapping")
+
+        prompt_id = entry.get("id")
+        title = entry.get("title")
+        prompt = entry.get("prompt")
+        if not prompt_id or not title or not prompt:
+            raise RuntimeError(
+                f"Prompt at index {idx} must define non-empty id, title, and prompt"
+            )
+        prompts.append(
+            PromptConfig(id=str(prompt_id), title=str(title), prompt=str(prompt))
+        )
+
+    return prompts
+
+
+def build_runtime_config(section: Dict[str, Any]) -> RuntimeConfig:
+    cfg = section.get("config", {})
+    if not isinstance(cfg, dict):
+        raise RuntimeError("model_screen.config must be a mapping")
+
+    params = section.get("params", section.get("prams", {}))
+    if not isinstance(params, dict):
+        raise RuntimeError("model_screen.params must be a mapping")
+
+    models = get_with_alias(cfg, "models", default=[])
+    include_files = get_with_alias(cfg, "include_files", "include-files", default=[])
+    include_globs = get_with_alias(cfg, "include_globs", "include-globs", default=[])
+    prompts = validate_prompts(get_with_alias(cfg, "prompts", default=[]))
+
+    if not isinstance(models, list):
+        raise RuntimeError("model_screen.config.models must be a list")
+    if not isinstance(include_files, list):
+        raise RuntimeError("model_screen.config.include_files must be a list")
+    if not isinstance(include_globs, list):
+        raise RuntimeError("model_screen.config.include_globs must be a list")
+
+    repo = get_with_alias(params, "repo", default=None)
+    output_dir = get_with_alias(params, "output_dir", "output-dir", default="./outputs")
+    passes = int(get_with_alias(params, "passes", default=2))
+    max_context_chars = int(
+        get_with_alias(params, "max_context_chars", "max-context-chars", default=36000)
+    )
+    max_file_chars = int(
+        get_with_alias(params, "max_file_chars", "max-file-chars", default=3500)
+    )
+    max_tokens = int(get_with_alias(params, "max_tokens", "max-tokens", default=900))
+    temperature = float(get_with_alias(params, "temperature", default=0.2))
+    top_p = float(get_with_alias(params, "top_p", "top-p", default=0.95))
+    top_k = int(get_with_alias(params, "top_k", "top-k", default=20))
+    provider = get_with_alias(params, "provider", default=None)
+    save_context = bool(
+        get_with_alias(params, "save_context", "save-context", default=False)
+    )
+    base_url = str(
+        get_with_alias(
+            params,
+            "base_url",
+            "base-url",
+            default="https://router.huggingface.co/v1",
+        )
+    )
+
+    return RuntimeConfig(
+        repo=str(repo) if repo is not None else None,
+        output_dir=str(output_dir),
+        models=[str(model) for model in models],
+        include_files=[str(path) for path in include_files],
+        include_globs=[str(pattern) for pattern in include_globs],
+        prompts=prompts,
+        passes=passes,
+        max_context_chars=max_context_chars,
+        max_file_chars=max_file_chars,
+        max_tokens=max_tokens,
+        temperature=temperature,
+        top_p=top_p,
+        top_k=top_k,
+        provider=str(provider) if provider is not None else None,
+        save_context=save_context,
+        base_url=base_url,
+    )
+
+
+def apply_cli_overrides(
+    config: RuntimeConfig, args: argparse.Namespace
+) -> RuntimeConfig:
+    if args.repo:
+        config.repo = args.repo
+    if args.outdir:
+        config.output_dir = args.outdir
+    if args.models is not None and len(args.models) > 0:
+        config.models = args.models
+    if args.passes is not None:
+        config.passes = args.passes
+    if args.max_context_chars is not None:
+        config.max_context_chars = args.max_context_chars
+    if args.max_file_chars is not None:
+        config.max_file_chars = args.max_file_chars
+    if args.max_tokens is not None:
+        config.max_tokens = args.max_tokens
+    if args.temperature is not None:
+        config.temperature = args.temperature
+    if args.top_p is not None:
+        config.top_p = args.top_p
+    if args.top_k is not None:
+        config.top_k = args.top_k
+    if args.provider is not None:
+        config.provider = args.provider
+    if args.save_context is not None:
+        config.save_context = args.save_context
+
+    if args.extra_file:
+        config.include_files = [*config.include_files, *args.extra_file]
+    if args.extra_glob:
+        config.include_globs = [*config.include_globs, *args.extra_glob]
+    return config
 
 
 def resolve_token(cli_token: str | None) -> str:
@@ -207,7 +407,6 @@ def resolve_token(cli_token: str | None) -> str:
     if env_token:
         return env_token
 
-    # Common local storage path used by Hugging Face CLI
     token_path = Path.home() / ".cache" / "huggingface" / "token"
     if token_path.exists():
         token = token_path.read_text(encoding="utf-8").strip()
@@ -229,21 +428,22 @@ def safe_read_text(path: Path, max_chars: int) -> str:
 
 
 def gather_repo_files(
-    repo_root: Path, extra_files: List[str], extra_globs: List[str]
+    repo_root: Path,
+    include_files: List[str],
+    include_globs: List[str],
 ) -> List[Path]:
     found: List[Path] = []
 
-    for rel in DEFAULT_INCLUDE_FILES + extra_files:
+    for rel in include_files:
         p = repo_root / rel
         if p.exists() and p.is_file():
             found.append(p)
 
-    for pattern in DEFAULT_INCLUDE_GLOBS + extra_globs:
+    for pattern in include_globs:
         for p in repo_root.glob(pattern):
             if p.is_file():
                 found.append(p)
 
-    # Stable unique ordering
     unique = []
     seen = set()
     for p in sorted(found):
@@ -292,7 +492,10 @@ def render_repo_tree(repo_root: Path, max_entries: int = 200) -> str:
 
 
 def build_repo_context(
-    repo_root: Path, files: List[Path], max_context_chars: int, max_file_chars: int
+    repo_root: Path,
+    files: List[Path],
+    max_context_chars: int,
+    max_file_chars: int,
 ) -> str:
     parts: List[str] = []
 
@@ -357,7 +560,7 @@ FILE_REF_PATTERNS = [
 ]
 
 HALLUCINATION_HINTS = [
-    r"\bgit status\b",  # Often suspicious if not actually grounded in provided context
+    r"\bgit status\b",
     r"\brecent commits\b",
     r"\bI checked\b",
     r"\bI found\b",
@@ -384,7 +587,6 @@ def repeated_fragment_score(text: str) -> float:
     """
     if not text:
         return 0.0
-    # Look at repeated 8-char windows
     windows = [text[i : i + 8] for i in range(0, max(0, len(text) - 7), 4)]
     if not windows:
         return 0.0
@@ -491,8 +693,6 @@ def run_one(
                 "top_k": top_k,
             },
         }
-        # Provider hint can be encoded in model selection on HF, but leave open for future use.
-        # We do not force provider routing here by default.
 
         response = client.chat.completions.create(**kwargs)
         elapsed = time.perf_counter() - start
@@ -531,7 +731,6 @@ def summarize_scores(metrics_rows: List[RunMetrics]) -> List[Dict[str, Any]]:
             sum(r.completion_tokens or 0 for r in rows) / n if n else 0.0
         )
 
-        # Heuristic composite scores
         directness_penalty = sum(
             1
             for r in rows
@@ -604,7 +803,7 @@ def write_markdown_report(
     lines.append("## Summary Ranking\n")
     for row in summary_rows:
         lines.append(
-            f"- **{row['model']}** — score {row['heuristic_composite_score_100']}/100, "
+            f"- **{row['model']}** - score {row['heuristic_composite_score_100']}/100, "
             f"avg elapsed {row['avg_elapsed_seconds']}s, "
             f"avg prompt tokens {row['avg_prompt_tokens']}, "
             f"avg completion tokens {row['avg_completion_tokens']}"
@@ -614,7 +813,7 @@ def write_markdown_report(
     lines.append("## Per-run Metrics\n")
     for m in metrics_rows:
         lines.append(
-            f"- **{m.model} / {m.prompt_id} / pass {m.pass_index}** — "
+            f"- **{m.model} / {m.prompt_id} / pass {m.pass_index}** - "
             f"{m.elapsed_seconds:.2f}s, prompt={m.prompt_tokens}, completion={m.completion_tokens}, "
             f"bullets={m.bullet_count}, plan_start={m.starts_with_plan_phrase}, "
             f"tests={m.contains_tests_reference}, docs={m.contains_docs_reference}, "
@@ -637,10 +836,65 @@ def write_markdown_report(
     path.write_text("\n".join(lines), encoding="utf-8")
 
 
+def runtime_config_to_dict(config: RuntimeConfig) -> Dict[str, Any]:
+    return {
+        "repo": config.repo,
+        "output_dir": config.output_dir,
+        "models": config.models,
+        "include_files": config.include_files,
+        "include_globs": config.include_globs,
+        "prompts": [asdict(prompt) for prompt in config.prompts],
+        "passes": config.passes,
+        "max_context_chars": config.max_context_chars,
+        "max_file_chars": config.max_file_chars,
+        "max_tokens": config.max_tokens,
+        "temperature": config.temperature,
+        "top_p": config.top_p,
+        "top_k": config.top_k,
+        "provider": config.provider,
+        "save_context": config.save_context,
+        "base_url": config.base_url,
+    }
+
+
+def build_effective_runtime_config(
+    args: argparse.Namespace,
+) -> tuple[RuntimeConfig, Path]:
+    defaults_section = load_model_screen_section(DEFAULT_CONFIG_PATH)
+    config_source = DEFAULT_CONFIG_PATH
+
+    if args.config:
+        user_config_path = resolve_config_path(args.config)
+        user_section = load_model_screen_section(user_config_path)
+        merged_section = merge_dicts(defaults_section, user_section)
+        config_source = user_config_path
+    else:
+        merged_section = defaults_section
+
+    runtime = build_runtime_config(merged_section)
+    runtime = apply_cli_overrides(runtime, args)
+
+    if not runtime.repo:
+        raise RuntimeError(
+            "Missing repository path. Set model_screen.params.repo in config or pass --repo."
+        )
+    if not runtime.models:
+        raise RuntimeError("No models configured. Set model_screen.config.models.")
+
+    return runtime, config_source
+
+
 def main() -> int:
     args = parse_args()
-    repo_root = Path(args.repo).expanduser().resolve()
-    outdir = Path(args.outdir).expanduser().resolve()
+
+    try:
+        runtime, config_source = build_effective_runtime_config(args)
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
+    repo_root = Path(runtime.repo).expanduser().resolve()
+    outdir = Path(runtime.output_dir).expanduser().resolve()
     outdir.mkdir(parents=True, exist_ok=True)
 
     if not repo_root.exists() or not repo_root.is_dir():
@@ -650,49 +904,69 @@ def main() -> int:
         )
         return 2
 
-    token = resolve_token(args.token)
-
-    client = OpenAI(
-        base_url="https://router.huggingface.co/v1",
-        api_key=token,
+    repo_files = gather_repo_files(
+        repo_root, runtime.include_files, runtime.include_globs
     )
-
-    repo_files = gather_repo_files(repo_root, args.extra_file, args.extra_glob)
     repo_context = build_repo_context(
         repo_root=repo_root,
         files=repo_files,
-        max_context_chars=args.max_context_chars,
-        max_file_chars=args.max_file_chars,
+        max_context_chars=runtime.max_context_chars,
+        max_file_chars=runtime.max_file_chars,
     )
 
-    if args.save_context:
+    if args.print_effective_config:
+        print(
+            json.dumps(
+                {
+                    "config_source": str(config_source),
+                    "runtime": runtime_config_to_dict(runtime),
+                },
+                indent=2,
+                ensure_ascii=False,
+            )
+        )
+
+    if args.dry_run_context:
+        context_path = outdir / "repo_context.txt"
+        context_path.write_text(repo_context, encoding="utf-8")
+        print(f"Dry run complete. Context written to: {context_path}")
+        return 0
+
+    if runtime.save_context:
         (outdir / "repo_context.txt").write_text(repo_context, encoding="utf-8")
+
+    token = resolve_token(args.token)
+
+    client = OpenAI(
+        base_url=runtime.base_url,
+        api_key=token,
+    )
 
     metrics_rows: List[RunMetrics] = []
     raw_outputs: List[Dict[str, Any]] = []
 
-    for model in args.models:
-        for prompt_cfg in DEFAULT_PROMPTS:
-            messages = build_messages(repo_context, prompt_cfg["prompt"])
-            for pass_index in range(1, args.passes + 1):
+    for model in runtime.models:
+        for prompt_cfg in runtime.prompts:
+            messages = build_messages(repo_context, prompt_cfg.prompt)
+            for pass_index in range(1, runtime.passes + 1):
                 print(
-                    f"Running model={model} prompt={prompt_cfg['id']} pass={pass_index} ..."
+                    f"Running model={model} prompt={prompt_cfg.id} pass={pass_index} ..."
                 )
                 response, output, elapsed, error = run_one(
                     client=client,
                     model=model,
                     messages=messages,
-                    max_tokens=args.max_tokens,
-                    temperature=args.temperature,
-                    top_p=args.top_p,
-                    top_k=args.top_k,
-                    provider=args.provider,
+                    max_tokens=runtime.max_tokens,
+                    temperature=runtime.temperature,
+                    top_p=runtime.top_p,
+                    top_k=runtime.top_k,
+                    provider=runtime.provider,
                 )
 
                 metrics = analyze_output(
                     model=model,
-                    prompt_id=prompt_cfg["id"],
-                    prompt_title=prompt_cfg["title"],
+                    prompt_id=prompt_cfg.id,
+                    prompt_title=prompt_cfg.title,
                     pass_index=pass_index,
                     elapsed_seconds=elapsed,
                     response_obj=response,
@@ -703,8 +977,8 @@ def main() -> int:
                 raw_outputs.append(
                     {
                         "model": model,
-                        "prompt_id": prompt_cfg["id"],
-                        "prompt_title": prompt_cfg["title"],
+                        "prompt_id": prompt_cfg.id,
+                        "prompt_title": prompt_cfg.title,
                         "pass_index": pass_index,
                         "output": output,
                         "error": error,
@@ -718,16 +992,9 @@ def main() -> int:
         outdir / "results.json",
         {
             "repo": str(repo_root),
-            "models": args.models,
-            "config": {
-                "passes": args.passes,
-                "max_context_chars": args.max_context_chars,
-                "max_file_chars": args.max_file_chars,
-                "max_tokens": args.max_tokens,
-                "temperature": args.temperature,
-                "top_p": args.top_p,
-                "top_k": args.top_k,
-            },
+            "models": runtime.models,
+            "config_source": str(config_source),
+            "config": runtime_config_to_dict(runtime),
             "summary": summary_rows,
             "metrics": metrics_dicts,
             "outputs": raw_outputs,
@@ -737,7 +1004,7 @@ def main() -> int:
     write_markdown_report(
         outdir / "results.md",
         repo_root=repo_root,
-        models=args.models,
+        models=runtime.models,
         metrics_rows=metrics_rows,
         raw_outputs=raw_outputs,
         summary_rows=summary_rows,
