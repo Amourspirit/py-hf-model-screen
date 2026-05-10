@@ -30,12 +30,15 @@ from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 import yaml
+from dotenv import load_dotenv
 from openai import OpenAI
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG_PATH = PROJECT_ROOT / "project-config" / "example_config.yaml"
 LOCAL_CONFIG_DIR = PROJECT_ROOT / "project-config-local"
+
+load_dotenv(PROJECT_ROOT / ".env")
 
 
 @dataclass
