@@ -51,6 +51,14 @@ uv run python ./scripts/hf_repo_model_screen.py \
 	--save-context
 ```
 
+Round-two roadmap fidelity example using an external local config:
+
+```bash
+uv run python ./scripts/hf_repo_model_screen.py \
+	--repo /path/to/project \
+	--config round_two_roadmap_fidelity
+```
+
 Print merged runtime config:
 
 ```bash
@@ -81,6 +89,12 @@ Named local config (`project-config-local/qwen_config.yaml`):
 
 ```bash
 make screen REPO=/path/to/project CONFIG=qwen_config
+```
+
+Named local round-two config:
+
+```bash
+make screen REPO=/path/to/project CONFIG=round_two_roadmap_fidelity
 ```
 
 Explicit config path:
