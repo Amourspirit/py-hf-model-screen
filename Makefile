@@ -1,49 +1,35 @@
 PYTHON_RUN := uv run python ./scripts/hf_repo_model_screen.py
-CONFIG ?= default_config
-CONFIG_PATH ?=
+CONFIG ?= ./project-config/default_config.yaml
 REPO ?=
 OUTDIR ?=
+NAME ?=
 EXTRA_ARGS ?=
 
-.PHONY: screen screen-default screen-path screen-context-dry help
+.PHONY: screen screen-context-dry help
 
 help:
 	@echo "Usage:"
-	@echo "  make screen REPO=/path/to/repo [CONFIG=qwen_config] [OUTDIR=./outputs]"
-	@echo "  make screen-path REPO=/path/to/repo CONFIG_PATH=/abs/path/config.yaml"
-	@echo "  make screen-default REPO=/path/to/repo"
-	@echo "  make screen-context-dry REPO=/path/to/repo [CONFIG=qwen_config]"
+	@echo "  make screen [CONFIG=config_name_or_path] [REPO=/path/to/repo] [NAME=short_name] [OUTDIR=./outputs]"
+	@echo "  make screen-context-dry [CONFIG=config_name_or_path] [REPO=/path/to/repo] [OUTDIR=./outputs]"
+	@echo ""
+	@echo "Notes:"
+	@echo "  - CONFIG defaults to ./project-config/default_config.yaml"
+	@echo "  - CONFIG can be a config name (resolved to project-config-local/) or an absolute path"
+	@echo "  - REPO overrides the repo path from config (optional)"
+	@echo "  - NAME sets --short-name for output filenames (optional)"
 
 screen:
-	@if [ -z "$(REPO)" ]; then echo "REPO is required"; exit 1; fi
 	@$(PYTHON_RUN) \
-		--repo "$(REPO)" \
 		--config "$(CONFIG)" \
-		$(if $(OUTDIR),--outdir "$(OUTDIR)",) \
-		$(EXTRA_ARGS)
-
-screen-default:
-	@if [ -z "$(REPO)" ]; then echo "REPO is required"; exit 1; fi
-	@$(PYTHON_RUN) \
-		--repo "$(REPO)" \
-		$(if $(OUTDIR),--outdir "$(OUTDIR)",) \
-		$(EXTRA_ARGS)
-
-screen-path:
-	@if [ -z "$(REPO)" ]; then echo "REPO is required"; exit 1; fi
-	@if [ -z "$(CONFIG_PATH)" ]; then echo "CONFIG_PATH is required"; exit 1; fi
-	@if [ ! -f "$(CONFIG_PATH)" ]; then echo "Config file not found: $(CONFIG_PATH)"; exit 1; fi
-	@$(PYTHON_RUN) \
-		--repo "$(REPO)" \
-		--config "$(CONFIG_PATH)" \
+		$(if $(REPO),--repo "$(REPO)",) \
+		$(if $(NAME),--short-name "$(NAME)",) \
 		$(if $(OUTDIR),--outdir "$(OUTDIR)",) \
 		$(EXTRA_ARGS)
 
 screen-context-dry:
-	@if [ -z "$(REPO)" ]; then echo "REPO is required"; exit 1; fi
 	@$(PYTHON_RUN) \
-		--repo "$(REPO)" \
 		--config "$(CONFIG)" \
+		$(if $(REPO),--repo "$(REPO)",) \
 		$(if $(OUTDIR),--outdir "$(OUTDIR)",) \
 		--dry-run-context \
 		$(EXTRA_ARGS)
