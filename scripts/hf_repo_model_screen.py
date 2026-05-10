@@ -20,12 +20,15 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import os
 import re
 import sys
+import tempfile
 import time
 from dataclasses import asdict, dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
@@ -66,6 +69,8 @@ class RuntimeConfig:
     provider: str | None
     save_context: bool
     base_url: str
+    output_formats: List[str]
+    short_name: str
 
 
 @dataclass
@@ -102,6 +107,58 @@ def get_with_alias(data: Dict[str, Any], *keys: str, default: Any = None) -> Any
         if key in data:
             return data[key]
     return default
+
+
+def sanitize_name(name: str) -> str:
+    """
+    Sanitize a name for use as a filename.
+    - Replace invalid filename chars with underscores
+    - Convert spaces to underscores
+    - Truncate to 50 chars and append MD5 hash to preserve uniqueness
+    """
+    invalid_chars = r'/\:*?"<>|'
+    sanitized = name
+    for char in invalid_chars:
+        sanitized = sanitized.replace(char, "_")
+    sanitized = sanitized.replace(" ", "_")
+
+    if len(sanitized) > 50:
+        name_hash = hashlib.md5(name.encode()).hexdigest()[:6]
+        sanitized = sanitized[:50] + "_" + name_hash
+    return sanitized
+
+
+def get_timestamp_str() -> str:
+    """Return current timestamp in human-readable format: YYYY-MM-DD_HHhMMmSSs"""
+    return datetime.now().strftime("%Y-%m-%d_%Hh%Mm%Ss")
+
+
+def validate_output_directory(outdir: Path) -> tuple[bool, str]:
+    """
+    Validate that output directory is writable.
+    Returns (True, "") on success, (False, error_msg) on failure.
+    """
+    try:
+        outdir.mkdir(parents=True, exist_ok=True)
+        test_file = outdir / ".hf_model_screen_write_test"
+        test_file.write_text("test", encoding="utf-8")
+        test_file.unlink()
+        return True, ""
+    except Exception as exc:
+        return False, f"Output directory not writable: {exc}"
+
+
+def write_yaml(path: Path, data: Any) -> None:
+    """Write data to YAML file."""
+    path.write_text(yaml.safe_dump(data, default_flow_style=False), encoding="utf-8")
+
+
+def build_result_filename(short_name: str, format_ext: str, timestamp: str) -> str:
+    """
+    Build timestamped result filename.
+    Returns: {short_name}_{timestamp}.{ext}
+    """
+    return f"{short_name}_{timestamp}.{format_ext}"
 
 
 def parse_args() -> argparse.Namespace:
@@ -221,6 +278,23 @@ def parse_args() -> argparse.Namespace:
         help=(
             "Build repo context and write repo_context.txt, then exit without "
             "calling the API"
+        ),
+    )
+    parser.add_argument(
+        "--output-formats",
+        nargs="*",
+        default=None,
+        help=(
+            "Output formats to generate (default: json, csv, markdown, yaml). "
+            "Space-separated list, e.g., json yaml csv"
+        ),
+    )
+    parser.add_argument(
+        "--short-name",
+        default=None,
+        help=(
+            "Short name for output filenames (will be sanitized). "
+            "Example: qwen_screening. Defaults to 'results'"
         ),
     )
     return parser.parse_args()
@@ -347,6 +421,17 @@ def build_runtime_config(section: Dict[str, Any]) -> RuntimeConfig:
             default="https://router.huggingface.co/v1",
         )
     )
+    output_formats = get_with_alias(
+        params,
+        "output_formats",
+        "output-formats",
+        default=["json", "csv", "markdown", "yaml"],
+    )
+    if not isinstance(output_formats, list):
+        output_formats = ["json", "csv", "markdown", "yaml"]
+    short_name = str(
+        get_with_alias(params, "short_name", "short-name", default="results")
+    )
 
     return RuntimeConfig(
         repo=str(repo) if repo is not None else None,
@@ -365,6 +450,8 @@ def build_runtime_config(section: Dict[str, Any]) -> RuntimeConfig:
         provider=str(provider) if provider is not None else None,
         save_context=save_context,
         base_url=base_url,
+        output_formats=[str(fmt) for fmt in output_formats],
+        short_name=short_name,
     )
 
 
@@ -400,6 +487,10 @@ def apply_cli_overrides(
         config.include_files = [*config.include_files, *args.extra_file]
     if args.extra_glob:
         config.include_globs = [*config.include_globs, *args.extra_glob]
+    if args.output_formats is not None and len(args.output_formats) > 0:
+        config.output_formats = args.output_formats
+    if args.short_name is not None:
+        config.short_name = args.short_name
     return config
 
 
@@ -857,6 +948,8 @@ def runtime_config_to_dict(config: RuntimeConfig) -> Dict[str, Any]:
         "provider": config.provider,
         "save_context": config.save_context,
         "base_url": config.base_url,
+        "output_formats": config.output_formats,
+        "short_name": config.short_name,
     }
 
 
@@ -899,6 +992,11 @@ def main() -> int:
     repo_root = Path(runtime.repo).expanduser().resolve()
     outdir = Path(runtime.output_dir).expanduser().resolve()
     outdir.mkdir(parents=True, exist_ok=True)
+    # Validate output directory writability before expensive operations
+    is_valid, validation_msg = validate_output_directory(outdir)
+    if not is_valid:
+        print(validation_msg, file=sys.stderr)
+        return 2
 
     if not repo_root.exists() or not repo_root.is_dir():
         print(
@@ -991,32 +1089,103 @@ def main() -> int:
     summary_rows = summarize_scores(metrics_rows)
 
     metrics_dicts = [asdict(m) for m in metrics_rows]
-    write_json(
-        outdir / "results.json",
-        {
-            "repo": str(repo_root),
-            "models": runtime.models,
-            "config_source": str(config_source),
-            "config": runtime_config_to_dict(runtime),
-            "summary": summary_rows,
-            "metrics": metrics_dicts,
-            "outputs": raw_outputs,
-        },
-    )
-    write_csv(outdir / "results.csv", metrics_dicts)
-    write_markdown_report(
-        outdir / "results.md",
-        repo_root=repo_root,
-        models=runtime.models,
-        metrics_rows=metrics_rows,
-        raw_outputs=raw_outputs,
-        summary_rows=summary_rows,
-    )
+    # Prepare report data
+    report_data = {
+        "repo": str(repo_root),
+        "models": runtime.models,
+        "config_source": str(config_source),
+        "config": runtime_config_to_dict(runtime),
+        "summary": summary_rows,
+        "metrics": metrics_dicts,
+        "outputs": raw_outputs,
+    }
 
-    print(f"\nDone. Reports written to: {outdir}")
-    print(f"- {outdir / 'results.json'}")
-    print(f"- {outdir / 'results.csv'}")
-    print(f"- {outdir / 'results.md'}")
+    # Generate timestamped filenames
+    timestamp = get_timestamp_str()
+    safe_name = sanitize_name(runtime.short_name)
+    write_dir = outdir
+    fallback_used = False
+
+    # Try to write reports to primary output directory, fallback to temp if needed
+    try:
+        if "json" in runtime.output_formats:
+            write_json(
+                write_dir / build_result_filename(safe_name, "json", timestamp),
+                report_data,
+            )
+        if "csv" in runtime.output_formats:
+            write_csv(
+                write_dir / build_result_filename(safe_name, "csv", timestamp),
+                metrics_dicts,
+            )
+        if "markdown" in runtime.output_formats:
+            write_markdown_report(
+                write_dir / build_result_filename(safe_name, "md", timestamp),
+                repo_root=repo_root,
+                models=runtime.models,
+                metrics_rows=metrics_rows,
+                raw_outputs=raw_outputs,
+                summary_rows=summary_rows,
+            )
+        if "yaml" in runtime.output_formats:
+            write_yaml(
+                write_dir / build_result_filename(safe_name, "yaml", timestamp),
+                report_data,
+            )
+    except (OSError, IOError, PermissionError) as exc:
+        # Fallback to temp directory
+        fallback_used = True
+        write_dir = Path(tempfile.gettempdir()) / "hf-model-screen"
+        write_dir.mkdir(parents=True, exist_ok=True)
+        print(
+            f"[WARNING] Primary output directory unavailable: {exc}",
+            file=sys.stderr,
+        )
+        print(
+            f"[WARNING] Attempting fallback write to: {write_dir}",
+            file=sys.stderr,
+        )
+
+        try:
+            if "json" in runtime.output_formats:
+                write_json(
+                    write_dir / build_result_filename(safe_name, "json", timestamp),
+                    report_data,
+                )
+            if "csv" in runtime.output_formats:
+                write_csv(
+                    write_dir / build_result_filename(safe_name, "csv", timestamp),
+                    metrics_dicts,
+                )
+            if "markdown" in runtime.output_formats:
+                write_markdown_report(
+                    write_dir / build_result_filename(safe_name, "md", timestamp),
+                    repo_root=repo_root,
+                    models=runtime.models,
+                    metrics_rows=metrics_rows,
+                    raw_outputs=raw_outputs,
+                    summary_rows=summary_rows,
+                )
+            if "yaml" in runtime.output_formats:
+                write_yaml(
+                    write_dir / build_result_filename(safe_name, "yaml", timestamp),
+                    report_data,
+                )
+        except Exception as fallback_exc:
+            print(f"[ERROR] Fallback write failed: {fallback_exc}", file=sys.stderr)
+            return 2
+
+    print(f"\nDone. Reports written to: {write_dir}")
+    for fmt in runtime.output_formats:
+        ext = "md" if fmt == "markdown" else fmt
+        filename = build_result_filename(safe_name, ext, timestamp)
+        print(f"- {write_dir / filename}")
+
+    if fallback_used:
+        print(
+            "\n[WARNING] Primary output directory was unavailable; reports saved to fallback location above."
+        )
+
     return 0
 
 

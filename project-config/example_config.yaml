@@ -57,6 +57,12 @@ model_screen:
   params:
     repo: /path/to/project
     output_dir: ./outputs
+    output_formats:
+      - json
+      - csv
+      - markdown
+      - yaml
+    short_name: results
     passes: 2
     max_context_chars: 36000
     max_file_chars: 3500
