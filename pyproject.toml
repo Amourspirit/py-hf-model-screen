@@ -1,8 +1,10 @@
 [project]
 name = "hf-model-screen"
 version = "0.1.0"
-description = "Add your description here"
+description = "Hugging Face model screening harness for local repositories"
 readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Barry-Thomas-Paul Moss" }]
 requires-python = ">=3.12"
 dependencies = [
     "huggingface-hub>=1.14.0",

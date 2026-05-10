@@ -110,3 +110,11 @@ uv run pytest
 ```
 
 Tests mock OpenAI calls and do not hit external APIs.
+
+## Contributing
+
+See `CONTRIBUTING.md` for contribution workflow and development expectations.
+
+## License
+
+This project is licensed under the MIT License. See `LICENSE` for details.
