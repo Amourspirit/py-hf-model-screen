@@ -11,6 +11,10 @@ wheels/
 venv/
 .envrc
 
+# OS / editor
+.DS_Store
+.idea/
+
 # Testing
 .coverage
 .coverage.*
